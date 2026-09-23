@@ -2,7 +2,15 @@ const { fork } = require("node:child_process");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
-const { app, BrowserWindow, dialog, session } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, session } = require("electron");
+const {
+  createBaselineProfile,
+  deleteBaselineProfile,
+  getBaselineStorePath,
+  readBaselineStore,
+  renameBaselineProfile,
+  selectBaselineProfile,
+} = require("./baseline-store.cjs");
 
 const STARTUP_TIMEOUT_MS = 30_000;
 
@@ -130,6 +138,39 @@ function configurePermissions() {
   );
 }
 
+function configureBaselineStorage() {
+  const storePath = getBaselineStorePath(app.getPath("home"));
+  const handle = (channel, handler) => {
+    ipcMain.handle(channel, async (event, ...args) => {
+      if (!isTrustedAppUrl(event.senderFrame.url)) {
+        throw new Error("拒绝来自非应用页面的本地数据请求。");
+      }
+      return handler(...args);
+    });
+  };
+
+  handle("baselines:list", async () => ({
+    ...(await readBaselineStore(storePath)),
+    configPath: storePath,
+  }));
+  handle("baselines:create", async (name, baseline) => ({
+    ...(await createBaselineProfile(storePath, name, baseline)),
+    configPath: storePath,
+  }));
+  handle("baselines:select", async (id) => ({
+    ...(await selectBaselineProfile(storePath, id)),
+    configPath: storePath,
+  }));
+  handle("baselines:rename", async (id, name) => ({
+    ...(await renameBaselineProfile(storePath, id, name)),
+    configPath: storePath,
+  }));
+  handle("baselines:delete", async (id) => ({
+    ...(await deleteBaselineProfile(storePath, id)),
+    configPath: storePath,
+  }));
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -141,6 +182,7 @@ async function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, "preload.cjs"),
       sandbox: true,
     },
   });
@@ -178,6 +220,7 @@ if (!hasSingleInstanceLock) {
     try {
       await startNextServer();
       configurePermissions();
+      configureBaselineStorage();
       await createWindow();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

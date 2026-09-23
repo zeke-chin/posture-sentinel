@@ -44,6 +44,8 @@
     "asar": true,
     "files": [
       "electron/main.cjs",
+      "electron/preload.cjs",
+      "electron/baseline-store.cjs",
       "package.json"
     ],
     "extraResources": [

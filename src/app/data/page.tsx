@@ -2,6 +2,7 @@
 
 import { useBaseline } from "@/hooks/useBaseline";
 import BaselineCard from "@/components/settings/BaselineCard";
+import BaselineProfilesCard from "@/components/settings/BaselineProfilesCard";
 import DataManagementCard from "@/components/settings/DataManagementCard";
 import { exportAllData, importAllData, getSessions } from "@/lib/storage";
 import { useCallback, useState, useEffect } from "react";
@@ -9,7 +10,19 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 export default function DataPage() {
-  const { baseline, removeBaseline } = useBaseline();
+  const {
+    baseline,
+    profiles,
+    activeProfileId,
+    configPath,
+    isDesktop,
+    isLoading,
+    storageError,
+    removeBaseline,
+    selectProfile,
+    renameProfile,
+    deleteProfile,
+  } = useBaseline();
   const router = useRouter();
   const [stats, setStats] = useState<{ sessions: number; totalMinutes: number } | null>(null);
 
@@ -88,9 +101,33 @@ export default function DataPage() {
 
       <section className="px-4 md:px-6 mt-6">
         <div className="max-w-[1100px] mx-auto">
-          <BaselineCard baseline={baseline} onRecalibrate={() => router.push("/detect")} onClear={removeBaseline} />
+          <BaselineCard
+            baseline={baseline}
+            onRecalibrate={() => router.push("/detect")}
+            onClear={() => {
+              if (window.confirm("确定删除当前基线吗？此操作无法撤销。")) {
+                void removeBaseline();
+              }
+            }}
+          />
         </div>
       </section>
+      {isDesktop && (
+        <section className="px-4 md:px-6 mt-6">
+          <div className="max-w-[1100px] mx-auto">
+            <BaselineProfilesCard
+              profiles={profiles}
+              activeProfileId={activeProfileId}
+              configPath={configPath}
+              isLoading={isLoading}
+              error={storageError}
+              onSelect={selectProfile}
+              onRename={renameProfile}
+              onDelete={deleteProfile}
+            />
+          </div>
+        </section>
+      )}
       <section className="px-4 md:px-6 mt-6">
         <div className="max-w-[1100px] mx-auto">
           <DataManagementCard onExport={handleExport} onImport={handleImport} />

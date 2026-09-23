@@ -11,6 +11,7 @@ interface CameraViewProps {
   status: PostureStatus;
   isActive: boolean;
   isDetecting: boolean;
+  isCalibrating?: boolean;
   isPaused?: boolean;
   isModelLoading: boolean;
   loadError?: string | null;
@@ -26,6 +27,7 @@ export default function CameraView({
   status,
   isActive,
   isDetecting,
+  isCalibrating = false,
   isPaused = false,
   isModelLoading,
   loadError,
@@ -105,7 +107,9 @@ export default function CameraView({
         {isDetecting && (
           <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full px-3 py-1">
             <span className="w-2.5 h-2.5 rounded-full bg-danger animate-blink-rec" />
-            <span className="text-white text-sm font-medium">REC</span>
+            <span className="text-white text-sm font-medium">
+              {isCalibrating ? "REC · 校准" : "REC"}
+            </span>
           </div>
         )}
 
@@ -113,7 +117,9 @@ export default function CameraView({
         {isDetecting && (
           <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-black/40 backdrop-blur-sm rounded-full px-3 py-1">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse-green" />
-            <span className="text-white text-sm">AI 检测中...</span>
+            <span className="text-white text-sm">
+              {isCalibrating ? "校准采样中..." : "AI 检测中..."}
+            </span>
           </div>
         )}
 

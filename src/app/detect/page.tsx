@@ -50,7 +50,8 @@ export default function DetectPage() {
   } = usePoseDetection(settings.detectionFps);
 
   // Load baseline early (needed by usePostureMetrics)
-  const { baseline, hasBaseline, captureBaseline } = useBaseline();
+  const { baseline, hasBaseline, profiles, activeProfileId, captureBaseline } = useBaseline();
+  const activeBaselineName = profiles.find((profile) => profile.id === activeProfileId)?.name;
 
   const metrics = usePostureMetrics(landmarks, {
     headAngleThreshold: settings.headAngleThreshold,
@@ -514,7 +515,8 @@ export default function DetectPage() {
               status={analyzer.currentStatus}
               isActive={isActive}
               isDetecting={isDetecting}
-              isPaused={detectState === "paused"}
+              isCalibrating={showBaselineSampling}
+              isPaused={detectState === "paused" && !showBaselineSampling}
               isModelLoading={isModelLoading}
               loadError={loadError}
               isRequestingPermission={isLoading}
@@ -528,25 +530,40 @@ export default function DetectPage() {
 
           {/* Metrics panel — aligned with camera area only */}
           <div className="lg:col-span-2 lg:aspect-[8/9] overflow-hidden">
-            <div className="bg-surface rounded-2xl p-5 md:p-6 h-full border border-border overflow-hidden">
-              <MetricsPanel
-                className="h-full overflow-y-auto"
-                metrics={metrics}
-                fps={fps}
-                sessionDuration={sessionState === "idle" ? 0 : elapsedTime}
-                isDetecting={isDetecting}
-                statusDuration={analyzer.statusDuration}
-                currentStatus={analyzer.currentStatus}
-                alertCount={analyzer.sessionStats.alertCount}
-                scoreGauge={
-                  <PostureGauge
-                    score={metrics.overallScore}
-                    isDetecting={isDetecting}
-                    isDetected={metrics.isDetected}
-                  />
-                }
+            {showBaselineSampling ? (
+              <BaselineSampling
+                metrics={landmarks && landmarks.length > 0 ? {
+                  headTiltAngle: calibrationMetrics.headTiltAngle,
+                  shoulderTiltAngle: calibrationMetrics.shoulderTiltAngle,
+                  neckForwardScore: calibrationMetrics.neckForwardScore,
+                  spineTiltAngle: calibrationMetrics.spineTiltAngle,
+                } : null}
+                worldLandmarks={worldLandmarks?.[0] ?? null}
+                isActive={isActive}
+                onCapture={handleBaselineCapture}
+                onCancel={handleCloseBaselineSampling}
               />
-            </div>
+            ) : (
+              <div className="bg-surface rounded-2xl p-5 md:p-6 h-full border border-border overflow-hidden">
+                <MetricsPanel
+                  className="h-full overflow-y-auto"
+                  metrics={metrics}
+                  fps={fps}
+                  sessionDuration={sessionState === "idle" ? 0 : elapsedTime}
+                  isDetecting={isDetecting}
+                  statusDuration={analyzer.statusDuration}
+                  currentStatus={analyzer.currentStatus}
+                  alertCount={analyzer.sessionStats.alertCount}
+                  scoreGauge={
+                    <PostureGauge
+                      score={metrics.overallScore}
+                      isDetecting={isDetecting}
+                      isDetected={metrics.isDetected}
+                    />
+                  }
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -587,8 +604,10 @@ export default function DetectPage() {
                   <circle cx="12" cy="12" r="3" />
                 </svg>
                 {hasBaseline
-                  ? baseline?.calibration
-                    ? `已校准 · ${baseline.calibration.viewMode === "front" ? "正面" : baseline.calibration.viewMode === "oblique" ? "斜侧面" : "侧面"}约 ${baseline.calibration.cameraYawMagnitude.toFixed(0)}°`
+                  ? activeBaselineName
+                    ? `当前：${activeBaselineName}`
+                    : baseline?.calibration
+                      ? `已校准 · ${baseline.calibration.viewMode === "front" ? "正面" : baseline.calibration.viewMode === "oblique" ? "斜侧面" : "侧面"}约 ${baseline.calibration.cameraYawMagnitude.toFixed(0)}°`
                     : "已校准 · 重新校准"
                   : "校准个人姿态基线"}
                 {hasBaseline && (
@@ -701,21 +720,6 @@ export default function DetectPage() {
     {/* Keyboard shortcuts help overlay */}
     <KeyboardHelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
 
-    {/* Baseline sampling overlay */}
-    {showBaselineSampling && (
-      <BaselineSampling
-        metrics={landmarks && landmarks.length > 0 ? {
-          headTiltAngle: calibrationMetrics.headTiltAngle,
-          shoulderTiltAngle: calibrationMetrics.shoulderTiltAngle,
-          neckForwardScore: calibrationMetrics.neckForwardScore,
-          spineTiltAngle: calibrationMetrics.spineTiltAngle,
-        } : null}
-        worldLandmarks={worldLandmarks?.[0] ?? null}
-        isActive={isActive}
-        onCapture={handleBaselineCapture}
-        onCancel={handleCloseBaselineSampling}
-      />
-    )}
     </ErrorBoundary>
   );
 }

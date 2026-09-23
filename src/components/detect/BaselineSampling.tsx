@@ -489,8 +489,14 @@ export default function BaselineSampling({
   );
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-dark/60 backdrop-blur-sm p-4">
-      <div className="bg-surface rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl">
+    <div className="bg-surface rounded-2xl border border-primary/20 h-full overflow-y-auto p-5 md:p-6 shadow-sm">
+      <div className="flex items-center justify-center gap-2 mb-3">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-60" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-danger" />
+        </span>
+        <span className="text-xs font-semibold tracking-wide text-danger-text">实时校准</span>
+      </div>
         <h3 className="text-xl font-bold text-text-primary text-center mb-2">
           {phase === "prepare" && "第一步：摄像头零位"}
           {phase === "camera" && "请面向摄像头"}
@@ -666,7 +672,6 @@ export default function BaselineSampling({
             </button>
           </div>
         )}
-      </div>
     </div>
   );
 }

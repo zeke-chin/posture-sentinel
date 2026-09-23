@@ -66,6 +66,8 @@
     "mac": {
       "category": "public.app-category.healthcare-fitness",
       "icon": "electron/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
       "target": [
         {
           "target": "dmg",

@@ -119,7 +119,8 @@ export function usePoseDetection(targetFps: number = 15): UsePoseDetectionReturn
     if (!detectingRef.current || !landmarkerRef.current || !videoRef.current) return;
 
     const video = videoRef.current;
-    if (video.paused || video.ended || document.hidden) {
+    const desktopCanRunHidden = window.postureDesktop?.monitoring.keepsRunningWhenHidden === true;
+    if (video.paused || video.ended || (document.hidden && !desktopCanRunHidden)) {
       animFrameRef.current = requestAnimationFrame(() => detectFrameRef.current());
       return;
     }

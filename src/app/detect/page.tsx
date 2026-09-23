@@ -104,6 +104,17 @@ export default function DetectPage() {
   const restReminder = useRestReminder(detectState === "detecting", detectState === "paused");
   const achievements = useAchievements(settings.dailyGoalMinutes);
 
+  // Electron keeps this renderer alive when other app pages are open in the
+  // management window. The browser build intentionally keeps route-local
+  // monitoring semantics.
+  useEffect(() => {
+    window.postureDesktop?.monitoring.setActive(detectState !== "idle");
+  }, [detectState]);
+
+  useEffect(() => {
+    return () => window.postureDesktop?.monitoring.setActive(false);
+  }, []);
+
   // Check if first-time user and show calibration wizard
   useEffect(() => {
     const hasCalibrated = localStorage.getItem("posture-sentinel:calibrated");

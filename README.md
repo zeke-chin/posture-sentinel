@@ -40,17 +40,28 @@ AI 实时坐姿检测工具，基于 Web 摄像头守护你的脊椎健康。
 
 ---
 
-## 开发
+## 桌面应用（主版本）
 
 ```bash
 # 安装依赖
-npm install
+bun install
 
-# 启动开发服务器
-npm run dev
+# Electron + Next.js，一条命令在同一个终端启动
+bun run desktop:dev
+
+# 构建 macOS DMG
+bun run desktop:pack
 ```
 
-开发服务器启动后，在浏览器中访问 `http://localhost:3000` 即可预览。
+实时监测进行中时，桌面应用会让检测窗口常驻运行。打开日报、数据或设置等页面时，摄像头与姿态分析不会中断；返回“实时检测”会恢复原来的监测窗口与会话状态。
+
+## 浏览器兼容预览
+
+```bash
+bun run dev
+```
+
+浏览器版用于界面预览和基础功能兼容，默认地址为 `http://localhost:3000`。它不提供桌面应用的常驻监测能力：离开 `/detect` 页面会卸载检测流程并停止摄像头。后续功能与体验优先以 Electron 桌面应用为准。
 
 ---
 

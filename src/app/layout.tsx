@@ -4,6 +4,7 @@ import "./globals.css";
 import Navbar from "@/components/Navbar";
 import ScrollObserver from "@/components/ScrollObserver";
 import StorageCleanup from "@/components/StorageCleanup";
+import DesktopNavigationBridge from "@/components/DesktopNavigationBridge";
 
 const lora = Lora({
   variable: "--font-lora",
@@ -77,6 +78,7 @@ export default function RootLayout({
       >
         <ScrollObserver />
         <StorageCleanup />
+        <DesktopNavigationBridge />
         <Navbar />
         <main>{children}</main>
       </body>

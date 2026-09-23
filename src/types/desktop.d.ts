@@ -23,10 +23,18 @@ interface DesktopBaselineApi {
   remove: (id: string) => Promise<BaselineStoreSnapshot>;
 }
 
+interface DesktopMonitoringApi {
+  keepsRunningWhenHidden: boolean;
+  setActive: (active: boolean) => void;
+  navigate: (path: string) => Promise<boolean>;
+  syncRoute: (path: string) => void;
+}
+
 declare global {
   interface Window {
     postureDesktop?: {
       baselines: DesktopBaselineApi;
+      monitoring: DesktopMonitoringApi;
     };
   }
 }

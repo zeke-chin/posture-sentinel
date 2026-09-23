@@ -15,8 +15,10 @@ const {
 const STARTUP_TIMEOUT_MS = 30_000;
 
 let mainWindow = null;
+let dashboardWindow = null;
 let nextServer = null;
 let appOrigin = null;
+let monitoringActive = false;
 
 function isTrustedAppUrl(value) {
   try {
@@ -171,8 +173,15 @@ function configureBaselineStorage() {
   }));
 }
 
-async function createWindow() {
-  mainWindow = new BrowserWindow({
+function configureWindowSecurity(window) {
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event, url) => {
+    if (!isTrustedAppUrl(url)) event.preventDefault();
+  });
+}
+
+function createAppWindow({ backgroundThrottling = true } = {}) {
+  const window = new BrowserWindow({
     width: 1280,
     height: 840,
     minWidth: 960,
@@ -184,16 +193,104 @@ async function createWindow() {
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.cjs"),
       sandbox: true,
+      backgroundThrottling,
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!isTrustedAppUrl(url)) event.preventDefault();
+  configureWindowSecurity(window);
+  return window;
+}
+
+function getAppRoute(value) {
+  try {
+    const url = new URL(value, appOrigin);
+    if (!appOrigin || url.origin !== appOrigin) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+function focusWindow(window) {
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+async function openDashboard(route) {
+  if (!dashboardWindow || dashboardWindow.isDestroyed()) {
+    const window = createAppWindow();
+    dashboardWindow = window;
+    window.on("closed", () => {
+      if (dashboardWindow === window) dashboardWindow = null;
+      if (monitoringActive) focusWindow(mainWindow);
+    });
+  }
+
+  const window = dashboardWindow;
+  await window.loadURL(new URL(route, appOrigin).toString());
+  if (!window || window.isDestroyed()) return;
+
+  focusWindow(window);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+}
+
+function showMonitoringWindow() {
+  focusWindow(mainWindow);
+
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    const window = dashboardWindow;
+    dashboardWindow = null;
+    window.close();
+  }
+}
+
+function configureMonitoringNavigation() {
+  ipcMain.on("monitoring:set-active", (event, active) => {
+    if (!isTrustedAppUrl(event.senderFrame.url)) return;
+    if (mainWindow?.webContents !== event.sender) return;
+    monitoringActive = active === true;
   });
+
+  ipcMain.handle("monitoring:navigate", async (event, target) => {
+    if (!isTrustedAppUrl(event.senderFrame.url)) {
+      throw new Error("拒绝来自非应用页面的导航请求。");
+    }
+
+    const route = getAppRoute(target);
+    if (!route || !monitoringActive) return false;
+    const pathname = new URL(route, appOrigin).pathname;
+
+    if (mainWindow?.webContents === event.sender && pathname !== "/detect") {
+      await openDashboard(route);
+      return true;
+    }
+
+    if (dashboardWindow?.webContents === event.sender && pathname === "/detect") {
+      showMonitoringWindow();
+      return true;
+    }
+
+    return false;
+  });
+
+  ipcMain.on("monitoring:sync-route", (event, target) => {
+    if (!isTrustedAppUrl(event.senderFrame.url) || !monitoringActive) return;
+    const route = getAppRoute(target);
+    if (!route || new URL(route, appOrigin).pathname !== "/detect") return;
+
+    if (dashboardWindow?.webContents === event.sender) showMonitoringWindow();
+  });
+}
+
+async function createWindow() {
+  mainWindow = createAppWindow({ backgroundThrottling: false });
+
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("closed", () => {
     mainWindow = null;
+    monitoringActive = false;
   });
 
   await mainWindow.loadURL(appOrigin);
@@ -210,10 +307,8 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    if (dashboardWindow?.isVisible()) focusWindow(dashboardWindow);
+    else focusWindow(mainWindow);
   });
 
   app.whenReady().then(async () => {
@@ -221,6 +316,7 @@ if (!hasSingleInstanceLock) {
       await startNextServer();
       configurePermissions();
       configureBaselineStorage();
+      configureMonitoringNavigation();
       await createWindow();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -231,6 +327,10 @@ if (!hasSingleInstanceLock) {
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0 && appOrigin) {
         void createWindow();
+      } else if (dashboardWindow?.isVisible()) {
+        focusWindow(dashboardWindow);
+      } else {
+        focusWindow(mainWindow);
       }
     });
   });

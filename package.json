@@ -10,7 +10,7 @@
     "build": "next build",
     "desktop:dev": "node electron/dev.cjs",
     "desktop:prepare": "node electron/prepare-next.cjs",
-    "desktop:pack": "bun run build && bun run desktop:prepare && electron-builder --mac dmg",
+    "desktop:pack": "bun run build && bun run desktop:prepare && electron-builder --mac dmg -c.electronDist=node_modules/electron/dist",
     "desktop:pack:dir": "bun run build && bun run desktop:prepare && electron-builder --mac dir",
     "start": "next start",
     "lint": "oxlint",

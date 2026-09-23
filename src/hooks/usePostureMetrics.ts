@@ -1,14 +1,25 @@
 "use client";
 
 import { useMemo } from "react";
-import { NormalizedLandmark } from "@mediapipe/tasks-vision";
-import { analyzePosture, DEFAULT_POSTURE_THRESHOLDS, type PostureMetrics, type PostureThresholds } from "@/lib/posture";
+import { Landmark, NormalizedLandmark } from "@mediapipe/tasks-vision";
+import {
+  analyzePosture,
+  DEFAULT_POSTURE_THRESHOLDS,
+  type PersonalPostureBaseline,
+  type PostureMetrics,
+  type PostureThresholds,
+} from "@/lib/posture";
 
 const DEFAULT_METRICS: PostureMetrics = {
   headTiltAngle: 0,
   shoulderTiltAngle: 0,
   neckForwardScore: 0,
   spineTiltAngle: 0,
+  torsoReclineAngle: null,
+  activeGoodPose: null,
+  metricScores: { headTilt: 0, shoulderTilt: 0, neckForward: 0, spineTilt: 0 },
+  metricDeviations: { headTilt: 0, shoulderTilt: 0, neckForward: 0, spineTilt: 0 },
+  angleSource: "image2d",
   overallScore: 0,
   status: "good",
   isDetected: false,
@@ -19,12 +30,8 @@ interface UsePostureMetricsOptions {
   shoulderThreshold?: { warning: number; bad: number };
   spineAngleThreshold?: { warning: number; bad: number };
   /** Personal posture baseline — when provided, thresholds become |baseline| + tolerance */
-  baseline?: {
-    headTilt: number;
-    shoulderTilt: number;
-    neckForward: number;
-    spineTilt: number;
-  } | null;
+  baseline?: PersonalPostureBaseline | null;
+  worldLandmarks?: Landmark[][] | null;
 }
 
 export function usePostureMetrics(
@@ -61,6 +68,18 @@ export function usePostureMetrics(
       };
     }
 
-    return analyzePosture(landmarks[0], thresholds, options.baseline);
-  }, [landmarks, options.headAngleThreshold, options.shoulderThreshold, options.spineAngleThreshold, options.baseline]);
+    return analyzePosture(
+      landmarks[0],
+      thresholds,
+      options.baseline,
+      options.worldLandmarks?.[0]
+    );
+  }, [
+    landmarks,
+    options.headAngleThreshold,
+    options.shoulderThreshold,
+    options.spineAngleThreshold,
+    options.baseline,
+    options.worldLandmarks,
+  ]);
 }

@@ -47,8 +47,6 @@ function AnimatedValue({ value, unit, color, animate = true }: { value: number; 
 
   useEffect(() => {
     if (!animate) {
-      // During live detection, skip animation — just show the value directly
-      setDisplay(value);
       prevRef.current = value;
       return;
     }
@@ -69,9 +67,11 @@ function AnimatedValue({ value, unit, color, animate = true }: { value: number; 
     return () => cancelAnimationFrame(rafRef.current);
   }, [value, animate]);
 
+  const visibleValue = animate ? display : value;
+
   return (
     <p className="text-2xl font-bold mt-1 tabular-nums" style={{ transition: "color 0.3s ease", color }}>
-      {display}<span className="text-sm font-normal text-text-muted ml-1">{unit}</span>
+      {visibleValue}<span className="text-sm font-normal text-text-muted ml-1">{unit}</span>
     </p>
   );
 }
@@ -105,48 +105,51 @@ function MetricsPanelImpl({
 }: MetricsPanelProps) {
   const config = statusConfig[currentStatus];
   const isUnknown = isDetecting && !metrics.isDetected;
-  const [displayFps, setDisplayFps] = useState(0);
-  const prevFpsRef = useRef(0);
-
-  useEffect(() => {
-    if (fps !== prevFpsRef.current) {
-      setDisplayFps(fps);
-      prevFpsRef.current = fps;
-    }
-  }, [fps]);
+  const personalized = metrics.activeGoodPose !== null;
+  const referenceLabel = metrics.activeGoodPose === "reclined" ? "舒适后仰" : "日常工作";
+  const colorFromScore = (score: number) =>
+    score < 50 ? COLORS.danger : score < 80 ? COLORS.warning : COLORS.primary;
 
   const metricCards = [
     {
-      name: "头部倾斜",
-      value: metrics.headTiltAngle,
+      name: personalized ? "头部倾斜偏差" : "头部倾斜",
+      value: personalized ? metrics.metricDeviations.headTilt : metrics.headTiltAngle,
       unit: "°",
-      threshold: "正常 < 8°",
-      progress: Math.min((metrics.headTiltAngle / 20) * 100, 100),
-      color: metrics.headTiltAngle > 15 ? COLORS.danger : metrics.headTiltAngle > 8 ? COLORS.warning : COLORS.primary,
+      threshold: personalized
+        ? `原始 ${metrics.headTiltAngle.toFixed(1)}° · ${referenceLabel}`
+        : "按当前阈值评估",
+      progress: 100 - metrics.metricScores.headTilt,
+      color: colorFromScore(metrics.metricScores.headTilt),
     },
     {
-      name: "肩膀倾斜",
-      value: metrics.shoulderTiltAngle,
+      name: personalized ? "肩膀倾斜偏差" : "肩膀倾斜",
+      value: personalized ? metrics.metricDeviations.shoulderTilt : metrics.shoulderTiltAngle,
       unit: "°",
-      threshold: "正常 < 5°",
-      progress: Math.min((metrics.shoulderTiltAngle / 12) * 100, 100),
-      color: metrics.shoulderTiltAngle > 10 ? COLORS.danger : metrics.shoulderTiltAngle > 5 ? COLORS.warning : COLORS.primary,
+      threshold: personalized
+        ? `原始 ${metrics.shoulderTiltAngle.toFixed(1)}° · ${referenceLabel}`
+        : "按当前阈值评估",
+      progress: 100 - metrics.metricScores.shoulderTilt,
+      color: colorFromScore(metrics.metricScores.shoulderTilt),
     },
     {
-      name: "脖子前倾",
-      value: metrics.neckForwardScore,
-      unit: "%",
-      threshold: "正常 < 40%",
-      progress: metrics.neckForwardScore,
-      color: metrics.neckForwardScore > 70 ? COLORS.danger : metrics.neckForwardScore > 40 ? COLORS.warning : COLORS.primary,
+      name: personalized ? "颈部前倾偏差" : "颈部前倾",
+      value: personalized ? metrics.metricDeviations.neckForward : metrics.neckForwardScore,
+      unit: "分",
+      threshold: personalized
+        ? `原始 ${metrics.neckForwardScore} 分 · ${referenceLabel}`
+        : "按当前阈值评估",
+      progress: 100 - metrics.metricScores.neckForward,
+      color: colorFromScore(metrics.metricScores.neckForward),
     },
     {
-      name: "脊椎倾斜",
-      value: metrics.spineTiltAngle,
+      name: personalized ? "躯干侧倾偏差" : "躯干侧倾",
+      value: personalized ? metrics.metricDeviations.spineTilt : metrics.spineTiltAngle,
       unit: "°",
-      threshold: "正常 < 8°",
-      progress: Math.min((metrics.spineTiltAngle / 20) * 100, 100),
-      color: metrics.spineTiltAngle > 15 ? COLORS.danger : metrics.spineTiltAngle > 8 ? COLORS.warning : COLORS.primary,
+      threshold: personalized
+        ? `原始 ${metrics.spineTiltAngle.toFixed(1)}° · ${referenceLabel}`
+        : "按当前阈值评估",
+      progress: 100 - metrics.metricScores.spineTilt,
+      color: colorFromScore(metrics.metricScores.spineTilt),
     },
   ];
 
@@ -215,6 +218,17 @@ function MetricsPanelImpl({
         <span>{isUnknown ? "未检测到人体" : config.label}</span>
       </div>
 
+      {!isUnknown && personalized && (
+        <p className="text-xs text-text-secondary -mt-2">
+          当前参考：{referenceLabel}
+          {metrics.angleSource === "world3d"
+            ? " · 三维头肩角"
+            : metrics.angleSource === "mixed"
+              ? " · 部分三维角度"
+              : " · 兼容旧版二维角度"}
+        </p>
+      )}
+
       {/* Metric Cards */}
       <div className="grid grid-cols-2 gap-3 md:gap-4">
         {metricCards.map((card) => (
@@ -232,7 +246,7 @@ function MetricsPanelImpl({
         )}
 
         <div className="flex items-center justify-between text-sm text-text-secondary">
-          <span>检测帧率：{displayFps} FPS</span>
+          <span>检测帧率：{fps} FPS</span>
           <span>会话时长：{formatDuration(sessionDuration)}</span>
         </div>
 

@@ -15,7 +15,7 @@ import { useAchievements } from "@/hooks/useAchievements";
 import { useVoiceCommands } from "@/hooks/useVoiceCommands";
 import { usePomodoro } from "@/hooks/usePomodoro";
 import { initAudio, playPhaseChangeSound } from "@/lib/sound";
-import { saveSession, generateId, getTodayDate } from "@/lib/storage";
+import { saveSession, generateId, getTodayDate, type PostureBaseline } from "@/lib/storage";
 import CameraView from "@/components/detect/CameraView";
 import MetricsPanel from "@/components/detect/MetricsPanel";
 import PostureGauge from "@/components/detect/PostureGauge";
@@ -40,6 +40,7 @@ export default function DetectPage() {
   const { videoRef, isActive, isLoading, error, startCamera, stopCamera } = useCamera();
   const {
     landmarks,
+    worldLandmarks,
     isModelLoading,
     isDetecting,
     loadError,
@@ -56,6 +57,15 @@ export default function DetectPage() {
     shoulderThreshold: settings.shoulderThreshold,
     spineAngleThreshold: settings.spineAngleThreshold,
     baseline: baseline,
+    worldLandmarks,
+  });
+  // Calibration samples must stay independent of an older saved baseline so
+  // recalibration always compares raw metrics in a consistent coordinate view.
+  const calibrationMetrics = usePostureMetrics(landmarks, {
+    headAngleThreshold: settings.headAngleThreshold,
+    shoulderThreshold: settings.shoulderThreshold,
+    spineAngleThreshold: settings.spineAngleThreshold,
+    worldLandmarks,
   });
 
   // Keep a ref to latest metrics so handleStop doesn't need metrics in its deps
@@ -86,6 +96,8 @@ export default function DetectPage() {
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [showBaselineSampling, setShowBaselineSampling] = useState(false);
+  const calibrationPausedAnalyzerRef = useRef(false);
+  const calibrationStartedDetectionRef = useRef(false);
 
   // Rest reminder and achievements
   const restReminder = useRestReminder(detectState === "detecting", detectState === "paused");
@@ -377,14 +389,23 @@ export default function DetectPage() {
   });
 
   // Handle baseline capture
-  const handleBaselineCapture = useCallback((data: { headTilt: number; shoulderTilt: number; neckForward: number; spineTilt: number }) => {
+  const handleBaselineCapture = useCallback((data: Omit<PostureBaseline, "capturedAt">) => {
     captureBaseline(data);
   }, [captureBaseline]);
 
   // Start camera for baseline sampling
   const handleStartBaselineSampling = useCallback(async () => {
-    // 已经在正式检测/暂停中：摄像头和检测均已就绪，直接打开采样弹窗
-    if (detectState !== "idle") {
+    // Keep pose inference running for calibration, but do not let calibration
+    // poses pollute the active session's posture durations or alerts.
+    if (detectState === "detecting") {
+      analyzer.pause();
+      calibrationPausedAnalyzerRef.current = true;
+      setShowBaselineSampling(true);
+      return;
+    }
+    if (detectState === "paused" && videoRef.current) {
+      await startDetection(videoRef.current);
+      calibrationStartedDetectionRef.current = true;
       setShowBaselineSampling(true);
       return;
     }
@@ -392,7 +413,7 @@ export default function DetectPage() {
     const success = await startCamera();
     if (!success) return;
     setShowBaselineSampling(true);
-  }, [startCamera, detectState]);
+  }, [analyzer, detectState, startCamera, startDetection, videoRef]);
 
   // During baseline sampling in idle state, auto-start pose detection so that
   // real-time metrics are available for capture. When detection is already
@@ -410,7 +431,17 @@ export default function DetectPage() {
       stopDetection();
       stopCamera();
     }
-  }, [detectState, stopCamera, stopDetection]);
+    if (calibrationStartedDetectionRef.current) {
+      calibrationStartedDetectionRef.current = false;
+      stopDetection();
+    }
+    if (calibrationPausedAnalyzerRef.current) {
+      calibrationPausedAnalyzerRef.current = false;
+      if (restReminder.phase !== "resting" && restReminder.phase !== "triggered") {
+        analyzer.resume();
+      }
+    }
+  }, [analyzer, detectState, restReminder.phase, stopCamera, stopDetection]);
 
   return (
     <ErrorBoundary>
@@ -488,7 +519,10 @@ export default function DetectPage() {
               loadError={loadError}
               isRequestingPermission={isLoading}
               error={error}
-              headTiltAngle={metrics.headTiltAngle}
+              headTiltAngle={
+                metrics.activeGoodPose ? metrics.metricDeviations.headTilt : metrics.headTiltAngle
+              }
+              headTiltScore={metrics.metricScores.headTilt}
             />
           </div>
 
@@ -552,7 +586,11 @@ export default function DetectPage() {
                   <circle cx="12" cy="12" r="10" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
-                {hasBaseline ? "已校准 · 重新校准" : "校准个人姿态基线"}
+                {hasBaseline
+                  ? baseline?.calibration
+                    ? `已校准 · ${baseline.calibration.viewMode === "front" ? "正面" : baseline.calibration.viewMode === "oblique" ? "斜侧面" : "侧面"}约 ${baseline.calibration.cameraYawMagnitude.toFixed(0)}°`
+                    : "已校准 · 重新校准"
+                  : "校准个人姿态基线"}
                 {hasBaseline && (
                   <span className="inline-flex items-center gap-1 bg-primary text-white text-xs px-2 py-0.5 rounded-full">
                     <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -667,11 +705,12 @@ export default function DetectPage() {
     {showBaselineSampling && (
       <BaselineSampling
         metrics={landmarks && landmarks.length > 0 ? {
-          headTiltAngle: metrics.headTiltAngle,
-          shoulderTiltAngle: metrics.shoulderTiltAngle,
-          neckForwardScore: metrics.neckForwardScore,
-          spineTiltAngle: metrics.spineTiltAngle,
+          headTiltAngle: calibrationMetrics.headTiltAngle,
+          shoulderTiltAngle: calibrationMetrics.shoulderTiltAngle,
+          neckForwardScore: calibrationMetrics.neckForwardScore,
+          spineTiltAngle: calibrationMetrics.spineTiltAngle,
         } : null}
+        worldLandmarks={worldLandmarks?.[0] ?? null}
         isActive={isActive}
         onCapture={handleBaselineCapture}
         onCancel={handleCloseBaselineSampling}

@@ -12,6 +12,7 @@ interface SkeletonOverlayProps {
   height: number;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   headTiltAngle: number;
+  headTiltScore: number;
   isActive: boolean;
 }
 
@@ -28,6 +29,7 @@ export default function SkeletonOverlay({
   height,
   videoRef,
   headTiltAngle,
+  headTiltScore,
   isActive,
 }: SkeletonOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,12 +37,17 @@ export default function SkeletonOverlay({
   const landmarksRef = useRef(landmarks);
   const statusRef = useRef(status);
   const headTiltRef = useRef(headTiltAngle);
+  const headTiltScoreRef = useRef(headTiltScore);
   const isActiveRef = useRef(isActive);
 
-  // Keep refs in sync with props (avoiding effect dependency on fast-changing data)
-  landmarksRef.current = landmarks;
-  statusRef.current = status;
-  headTiltRef.current = headTiltAngle;
+  // Keep the animation loop inputs current without rebuilding the RAF loop.
+  useEffect(() => {
+    landmarksRef.current = landmarks;
+    statusRef.current = status;
+    headTiltRef.current = headTiltAngle;
+    headTiltScoreRef.current = headTiltScore;
+    isActiveRef.current = isActive;
+  }, [headTiltAngle, headTiltScore, isActive, landmarks, status]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -59,8 +66,6 @@ export default function SkeletonOverlay({
     ctx.scale(dpr, dpr);
 
     let running = true;
-
-    // Keep isActive ref in sync for draw loop to check
     isActiveRef.current = isActive;
 
     const draw = () => {
@@ -148,9 +153,9 @@ export default function SkeletonOverlay({
         const leftEar = lms[0][7];
         const rightEar = lms[0][8];
         if (leftEar && rightEar) {
-          const tilt = headTiltRef.current;
           ctx.globalAlpha = 0.5;
-          ctx.strokeStyle = tilt <= 5 ? "#10b981" : tilt <= 10 ? "#f59e0b" : "#ef4444";
+          const score = headTiltScoreRef.current;
+          ctx.strokeStyle = score >= 80 ? "#10b981" : score >= 50 ? "#f59e0b" : "#ef4444";
           ctx.lineWidth = 2;
           ctx.setLineDash([6, 4]);
           ctx.beginPath();
@@ -172,7 +177,8 @@ export default function SkeletonOverlay({
           const earMidX = (1 - (le.x + re.x) / 2) * width;
           const earMidY = ((le.y + re.y) / 2) * height;
           const angleText = `${Math.round(tilt)}°`;
-          const angleColor = tilt <= 8 ? "#10b981" : tilt <= 15 ? "#f59e0b" : "#ef4444";
+          const score = headTiltScoreRef.current;
+          const angleColor = score >= 80 ? "#10b981" : score >= 50 ? "#f59e0b" : "#ef4444";
 
           ctx.fillStyle = "rgba(0,0,0,0.6)";
           const tw = ctx.measureText(angleText).width;

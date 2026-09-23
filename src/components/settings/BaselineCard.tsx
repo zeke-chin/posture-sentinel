@@ -1,12 +1,6 @@
 "use client";
 
-interface PostureBaseline {
-  headTilt: number;
-  shoulderTilt: number;
-  neckForward: number;
-  spineTilt: number;
-  capturedAt: number;
-}
+import type { PostureBaseline } from "@/lib/storage";
 
 interface BaselineCardProps {
   baseline: PostureBaseline | null;
@@ -34,9 +28,15 @@ interface MetricConfig {
 const METRICS: MetricConfig[] = [
   { key: "headTilt", label: "头部倾斜", unit: "°" },
   { key: "shoulderTilt", label: "肩膀倾斜", unit: "°" },
-  { key: "neckForward", label: "颈部前倾", unit: "°" },
+  { key: "neckForward", label: "颈部前倾", unit: "分" },
   { key: "spineTilt", label: "脊椎倾斜", unit: "°" },
 ];
+
+const VIEW_LABELS = {
+  front: "正面",
+  oblique: "斜侧面",
+  side: "侧面",
+} as const;
 
 export default function BaselineCard({
   baseline,
@@ -68,6 +68,32 @@ export default function BaselineCard({
 
       {baseline ? (
         <>
+          {baseline.calibration && (
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="bg-primary-light rounded-xl p-3 text-center">
+                <p className="text-xs text-primary-text mb-1">摄像头夹角</p>
+                <p className="text-lg font-bold text-primary-text">
+                  约 {baseline.calibration.cameraYawMagnitude.toFixed(0)}°
+                </p>
+              </div>
+              <div className="bg-primary-light rounded-xl p-3 text-center">
+                <p className="text-xs text-primary-text mb-1">检测视角</p>
+                <p className="text-lg font-bold text-primary-text">
+                  {VIEW_LABELS[baseline.calibration.viewMode]}
+                </p>
+              </div>
+              {baseline.calibration.reclined?.torsoRecline !== null &&
+                baseline.calibration.reclined?.torsoRecline !== undefined && (
+                  <div className="bg-primary-light rounded-xl p-3 text-center col-span-2">
+                    <p className="text-xs text-primary-text mb-1">舒适后仰姿势</p>
+                    <p className="text-lg font-bold text-primary-text">
+                      约 {baseline.calibration.reclined.torsoRecline.toFixed(0)}°
+                    </p>
+                  </div>
+                )}
+            </div>
+          )}
+
           {/* Baseline metrics grid */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             {METRICS.map((m) => (
@@ -85,6 +111,21 @@ export default function BaselineCard({
               </div>
             ))}
           </div>
+
+          {baseline.calibration && (
+            <p className="text-xs text-text-secondary mb-4">
+              校准可信度：
+              {baseline.calibration.confidence === "high"
+                ? "高"
+                : baseline.calibration.confidence === "medium"
+                  ? "中"
+                  : "较低"}
+              {baseline.calibration.reminder
+                ? ` · 已学习 ${baseline.calibration.learnedMetrics.length} 个提醒指标`
+                : " · 未采集提醒姿势"}
+              {baseline.calibration.reclined ? " · 已采集舒适后仰" : " · 未采集舒适后仰"}
+            </p>
+          )}
 
           {/* Captured time */}
           <div className="flex items-center gap-2 mb-5">

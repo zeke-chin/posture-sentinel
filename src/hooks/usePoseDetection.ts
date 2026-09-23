@@ -1,11 +1,17 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { PoseLandmarker, FilesetResolver, NormalizedLandmark } from "@mediapipe/tasks-vision";
+import {
+  PoseLandmarker,
+  FilesetResolver,
+  NormalizedLandmark,
+  Landmark,
+} from "@mediapipe/tasks-vision";
 import { MEDIAPIPE_CONFIG } from "@/lib/mediapipe-config";
 
 export interface UsePoseDetectionReturn {
   landmarks: NormalizedLandmark[][] | null;
+  worldLandmarks: Landmark[][] | null;
   isModelLoading: boolean;
   isDetecting: boolean;
   loadError: string | null;
@@ -33,6 +39,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 export function usePoseDetection(targetFps: number = 15): UsePoseDetectionReturn {
   const [landmarks, setLandmarks] = useState<NormalizedLandmark[][] | null>(null);
+  const [worldLandmarks, setWorldLandmarks] = useState<Landmark[][] | null>(null);
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [fps, setFps] = useState(0);
@@ -43,7 +50,6 @@ export function usePoseDetection(targetFps: number = 15): UsePoseDetectionReturn
   const frameCountRef = useRef<number>(0);
   const lastFpsUpdateRef = useRef<number>(0);
   const lastDetectTimeRef = useRef<number>(0);
-  const prevLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const detectingRef = useRef<boolean>(false);
   const detectFrameRef = useRef<() => void>(() => {});
@@ -126,31 +132,31 @@ export function usePoseDetection(targetFps: number = 15): UsePoseDetectionReturn
       try {
         const results = landmarkerRef.current.detectForVideo(video, now);
         if (results.landmarks && results.landmarks.length > 0) {
-          const prevLandmarks = prevLandmarksRef.current;
-          const current = results.landmarks[0];
-          // Always update diff ref so movement is tracked at full FPS
-          prevLandmarksRef.current = current.map(p => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility }));
-
-          // Determine if enough movement occurred to warrant a display update
-          let hasMovement = true; // default true for first frame
-          if (prevLandmarks) {
-            let maxDiff = 0;
-            for (let i = 0; i < Math.min(current.length, prevLandmarks.length); i++) {
-              const dx = Math.abs(current[i].x - prevLandmarks[i].x);
-              const dy = Math.abs(current[i].y - prevLandmarks[i].y);
-              maxDiff = Math.max(maxDiff, dx, dy);
-            }
-            hasMovement = maxDiff >= 0.003;
-          }
-
           // Throttle state updates to ~8Hz to reduce React re-render cascade
-          // Detection & diffing still run at full targetFps
-          if (hasMovement && now - lastStateUpdateRef.current >= STATE_UPDATE_INTERVAL_MS) {
+          // Detection still runs at full targetFps. Continuous state updates are
+          // intentional so a motionless calibration pose still yields samples.
+          if (now - lastStateUpdateRef.current >= STATE_UPDATE_INTERVAL_MS) {
             lastStateUpdateRef.current = now;
             // Deep copy landmarks: MediaPipe reuses internal buffers, so storing
             // the raw reference can cause React to skip re-renders (Object.is)
             // or downstream useMemo to read stale/mutated data
-            setLandmarks(results.landmarks.map(arr => arr.map(p => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility }))));
+            setLandmarks(
+              results.landmarks.map((arr) =>
+                arr.map((p) => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility }))
+              )
+            );
+            setWorldLandmarks(
+              results.worldLandmarks?.length
+                ? results.worldLandmarks.map((arr) =>
+                    arr.map((point) => ({
+                      x: point.x,
+                      y: point.y,
+                      z: point.z,
+                      visibility: point.visibility,
+                    }))
+                  )
+                : null
+            );
           }
         }
       } catch {
@@ -199,6 +205,7 @@ export function usePoseDetection(targetFps: number = 15): UsePoseDetectionReturn
     }
     setFps(0);
     setLandmarks(null);
+    setWorldLandmarks(null);
   }, []);
 
   useEffect(() => {
@@ -211,5 +218,14 @@ export function usePoseDetection(targetFps: number = 15): UsePoseDetectionReturn
     };
   }, [stopDetection]);
 
-  return { landmarks, isModelLoading, isDetecting, loadError, fps, startDetection, stopDetection };
+  return {
+    landmarks,
+    worldLandmarks,
+    isModelLoading,
+    isDetecting,
+    loadError,
+    fps,
+    startDetection,
+    stopDetection,
+  };
 }

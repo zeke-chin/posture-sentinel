@@ -1,4 +1,10 @@
-import { NormalizedLandmark } from "@mediapipe/tasks-vision";
+import { Landmark, NormalizedLandmark } from "@mediapipe/tasks-vision";
+import {
+  estimateTorsoRecline,
+  type CalibrationMetricKey,
+  type CalibrationMetricValues,
+  type CameraCalibrationProfile,
+} from "@/lib/calibration";
 
 export type PostureStatus = "good" | "warning" | "bad";
 
@@ -13,9 +19,22 @@ export interface PostureMetrics {
   shoulderTiltAngle: number;  // 肩膀倾斜（度），shoulder line from horizontal, 0=level
   neckForwardScore: number;   // 脖子前倾程度（0-100），0=正常，越高越严重
   spineTiltAngle: number;     // 脊椎倾斜（度），shoulder-to-hip from vertical, 0=straight
+  torsoReclineAngle: number | null; // 躯干后仰角（度），正数=后仰，负数=前倾
+  activeGoodPose: "working" | "reclined" | null;
+  metricScores: CalibrationMetricValues; // 各子项 0-100，越高越好
+  metricDeviations: CalibrationMetricValues; // 相对当前良好姿势中心的绝对偏差
+  angleSource: "image2d" | "mixed" | "world3d";
   overallScore: number;       // 总评分（0-100），越高越好
   status: PostureStatus;
   isDetected: boolean;
+}
+
+export interface PersonalPostureBaseline {
+  headTilt: number;
+  shoulderTilt: number;
+  neckForward: number;
+  spineTilt: number;
+  calibration?: CameraCalibrationProfile;
 }
 
 interface Point {
@@ -71,6 +90,29 @@ function calculateShoulderTiltAngle(landmarks: NormalizedLandmark[]): number {
   return tiltFromHorizontal(leftShoulder, rightShoulder);
 }
 
+function calculateWorldAxisTilt(
+  a: Landmark | undefined,
+  b: Landmark | undefined
+): number | null {
+  if (
+    !a ||
+    !b ||
+    !Number.isFinite(a.x) ||
+    !Number.isFinite(a.y) ||
+    !Number.isFinite(a.z) ||
+    !Number.isFinite(b.x) ||
+    !Number.isFinite(b.y) ||
+    !Number.isFinite(b.z)
+  ) {
+    return null;
+  }
+
+  const horizontalDistance = Math.hypot(b.x - a.x, b.z - a.z);
+  const verticalDifference = Math.abs(b.y - a.y);
+  if (Math.hypot(horizontalDistance, verticalDifference) < 0.001) return null;
+  return Math.atan2(verticalDifference, horizontalDistance) * (180 / Math.PI);
+}
+
 // ── Metric 3: Forward Neck Score (0-100, higher = worse) ──
 // Uses weighted average of two reliable indicators for front-facing webcam:
 //
@@ -86,7 +128,10 @@ function calculateShoulderTiltAngle(landmarks: NormalizedLandmark[]): number {
 //    Normal upright: pitchRatio ≈ 0.5-0.8 (nose below ears)
 //    Looking up: pitchRatio < 0.35 (nose rises toward ear level)
 //    Looking down: pitchRatio > 0.95 (nose drops further)
-function calculateNeckForwardScore(landmarks: NormalizedLandmark[], baseline?: { neckForward: number }): number {
+function calculateNeckForwardScore(
+  landmarks: NormalizedLandmark[],
+  baseline?: { neckForward: number }
+): number {
   const nose = landmarks[0];
   const leftShoulder = landmarks[11];
   const rightShoulder = landmarks[12];
@@ -181,6 +226,106 @@ function scoreFromBadness(value: number, goodThreshold: number, badThreshold: nu
   return Math.round(100 * (1 - (value - goodThreshold) / (badThreshold - goodThreshold)));
 }
 
+function scoreFromPersonalExample(value: number, goodValue: number, reminderValue: number): number {
+  const delta = reminderValue - goodValue;
+  if (Math.abs(delta) < 0.001) return 100;
+  const progress = (value - goodValue) / delta;
+  return scoreFromBadness(progress, 0.35, 0.85);
+}
+
+function scoreFromBaselineDeviation(
+  value: number,
+  baseline: number,
+  warningTolerance: number,
+  badTolerance: number
+): number {
+  return scoreFromBadness(Math.abs(value - baseline), warningTolerance, badTolerance);
+}
+
+const PERSONAL_TOLERANCES: Record<CalibrationMetricKey, { warning: number; bad: number }> = {
+  headTilt: { warning: 10, bad: 20 },
+  shoulderTilt: { warning: 8, bad: 15 },
+  neckForward: { warning: 15, bad: 35 },
+  spineTilt: { warning: 6, bad: 12 },
+};
+
+function personalScore(
+  key: CalibrationMetricKey,
+  value: number,
+  baseline: PersonalPostureBaseline,
+  reference: CalibrationMetricValues,
+  allowReminderModel: boolean
+): number {
+  const profile = baseline.calibration;
+  const reminder = profile?.reminder;
+  if (profile && reminder && allowReminderModel && profile.learnedMetrics.includes(key)) {
+    return scoreFromPersonalExample(value, profile.working[key], reminder[key]);
+  }
+
+  return scoreFromBaselineDeviation(
+    value,
+    reference[key],
+    PERSONAL_TOLERANCES[key].warning,
+    PERSONAL_TOLERANCES[key].bad
+  );
+}
+
+function distanceToGoodPose(
+  current: CalibrationMetricValues,
+  reference: CalibrationMetricValues,
+  currentRecline: number | null,
+  referenceRecline: number | null | undefined
+): number {
+  const metricKeys = Object.keys(PERSONAL_TOLERANCES) as CalibrationMetricKey[];
+  let squaredDistance = metricKeys.reduce((sum, key) => {
+    const scale = PERSONAL_TOLERANCES[key].warning;
+    return sum + ((current[key] - reference[key]) / scale) ** 2;
+  }, 0);
+  let dimensions = metricKeys.length;
+
+  if (currentRecline !== null && typeof referenceRecline === "number") {
+    squaredDistance += ((currentRecline - referenceRecline) / 10) ** 2;
+    dimensions += 1;
+  }
+
+  return squaredDistance / dimensions;
+}
+
+function selectGoodPose(
+  baseline: PersonalPostureBaseline,
+  current: CalibrationMetricValues,
+  torsoReclineAngle: number | null
+): {
+  reference: CalibrationMetricValues;
+  kind: "working" | "reclined";
+} {
+  const profile = baseline.calibration;
+  const working = profile?.working ?? baseline;
+  const reclined = profile?.reclined;
+  const workingAngle = profile?.working.torsoRecline;
+  const reclinedAngle = reclined?.torsoRecline;
+
+  if (reclined) {
+    const workingDistance = distanceToGoodPose(
+      current,
+      working,
+      torsoReclineAngle,
+      workingAngle
+    );
+    const reclinedDistance = distanceToGoodPose(
+      current,
+      reclined,
+      torsoReclineAngle,
+      reclinedAngle
+    );
+    if (reclinedDistance < workingDistance) {
+      return { reference: reclined, kind: "reclined" };
+    }
+  }
+
+  return { reference: working, kind: "working" };
+}
+
 export const DEFAULT_POSTURE_THRESHOLDS: PostureThresholds = {
   headAngle: { warning: 8, bad: 20 },
   shoulder: { warning: 5, bad: 12 },
@@ -190,7 +335,8 @@ export const DEFAULT_POSTURE_THRESHOLDS: PostureThresholds = {
 export function analyzePosture(
   landmarks: NormalizedLandmark[],
   thresholds: PostureThresholds = DEFAULT_POSTURE_THRESHOLDS,
-  baseline?: { headTilt: number; shoulderTilt: number; neckForward: number; spineTilt: number } | null
+  baseline?: PersonalPostureBaseline | null,
+  worldLandmarks?: Landmark[] | null
 ): PostureMetrics {
   // Check if essential landmarks exist and have valid coordinates.
   // Note: MediaPipe pose_landmarker_lite often returns visibility=0 or undefined
@@ -224,6 +370,11 @@ export function analyzePosture(
       shoulderTiltAngle: 0,
       neckForwardScore: 0,
       spineTiltAngle: 0,
+      torsoReclineAngle: null,
+      activeGoodPose: null,
+      metricScores: { headTilt: 0, shoulderTilt: 0, neckForward: 0, spineTilt: 0 },
+      metricDeviations: { headTilt: 0, shoulderTilt: 0, neckForward: 0, spineTilt: 0 },
+      angleSource: "image2d",
       overallScore: 0,
       status: "good",
       isDetected: false,
@@ -231,23 +382,89 @@ export function analyzePosture(
   }
 
   // Compute metrics, using 0 for unavailable ones
-  const headTiltAngle = earsDetected ? calculateHeadTiltAngle(landmarks) : 0;
-  const shoulderTiltAngle = calculateShoulderTiltAngle(landmarks);
-  const neckForwardScore = calculateNeckForwardScore(landmarks, baseline ?? undefined);
+  // Profiles captured before schema v4 contain image-space angles. Keep using
+  // those values until recalibration so existing personal baselines stay valid.
+  const usesLegacyImageAngles = Boolean(
+    baseline?.calibration && baseline.calibration.schemaVersion < 4
+  );
+  const worldHeadTilt =
+    !usesLegacyImageAngles && worldLandmarks
+      ? calculateWorldAxisTilt(worldLandmarks[7], worldLandmarks[8])
+      : null;
+  const worldShoulderTilt =
+    !usesLegacyImageAngles && worldLandmarks
+      ? calculateWorldAxisTilt(worldLandmarks[11], worldLandmarks[12])
+      : null;
+  const headTiltAngle = earsDetected
+    ? (worldHeadTilt ?? calculateHeadTiltAngle(landmarks))
+    : 0;
+  const shoulderTiltAngle = worldShoulderTilt ?? calculateShoulderTiltAngle(landmarks);
+  const worldAngleCount = Number(worldHeadTilt !== null) + Number(worldShoulderTilt !== null);
+  const angleSource = worldAngleCount === 2 ? "world3d" : worldAngleCount === 1 ? "mixed" : "image2d";
+  // Versioned calibration compares the raw metric against captured examples.
+  // Legacy baselines retain their historical ratio remapping for compatibility.
+  const neckForwardScore = calculateNeckForwardScore(
+    landmarks,
+    baseline && !baseline.calibration ? baseline : undefined
+  );
   const spineTiltAngle = hipsDetected ? calculateSpineTiltAngle(landmarks) : 0;
+  const torsoReclineAngle = worldLandmarks
+    ? (estimateTorsoRecline(worldLandmarks)?.angle ?? null)
+    : null;
+  const currentValues: CalibrationMetricValues = {
+    headTilt: headTiltAngle,
+    shoulderTilt: shoulderTiltAngle,
+    neckForward: neckForwardScore,
+    spineTilt: spineTiltAngle,
+  };
+  const goodPose = baseline?.calibration
+    ? selectGoodPose(baseline, currentValues, torsoReclineAngle)
+    : null;
 
   // Individual scores (0-100, higher = better posture)
   // Head tilt (only scored if ears detected)
   const headScore = earsDetected
-    ? scoreFromBadness(headTiltAngle, thresholds.headAngle.warning, thresholds.headAngle.bad)
+    ? baseline?.calibration
+      ? personalScore(
+          "headTilt",
+          headTiltAngle,
+          baseline,
+          goodPose?.reference ?? baseline,
+          goodPose?.kind !== "reclined"
+        )
+      : scoreFromBadness(headTiltAngle, thresholds.headAngle.warning, thresholds.headAngle.bad)
     : 100;
   // Shoulder tilt
-  const shoulderScore = scoreFromBadness(shoulderTiltAngle, thresholds.shoulder.warning, thresholds.shoulder.bad);
+  const shoulderScore = baseline?.calibration
+    ? personalScore(
+        "shoulderTilt",
+        shoulderTiltAngle,
+        baseline,
+        goodPose?.reference ?? baseline,
+        goodPose?.kind !== "reclined"
+      )
+    : scoreFromBadness(shoulderTiltAngle, thresholds.shoulder.warning, thresholds.shoulder.bad);
   // Forward neck (good < 20, bad > 60 on the 0-100 severity scale)
-  const neckScore = scoreFromBadness(neckForwardScore, 20, 60);
+  const neckScore = baseline?.calibration
+    ? personalScore(
+        "neckForward",
+        neckForwardScore,
+        baseline,
+        goodPose?.reference ?? baseline,
+        goodPose?.kind !== "reclined"
+      )
+    : scoreFromBadness(neckForwardScore, 20, 60);
   // Spine tilt (only scored if hips detected)
   const spineScore = hipsDetected
-    ? scoreFromBadness(spineTiltAngle, thresholds.spineAngle.warning, thresholds.spineAngle.bad)
+    ? baseline?.calibration
+      ? personalScore(
+          "spineTilt",
+          spineTiltAngle,
+          baseline,
+          goodPose?.reference ?? baseline,
+          goodPose?.kind !== "reclined"
+        )
+      : scoreFromBadness(spineTiltAngle, thresholds.spineAngle.warning, thresholds.spineAngle.bad)
     : 100;
 
   // Overall score: weighted average (redistribute weights for unavailable metrics)
@@ -273,11 +490,38 @@ export function analyzePosture(
   if (worstScore < 50) status = "bad";
   else if (worstScore < 80) status = "warning";
 
+  const activeReference = goodPose?.reference;
+  const metricDeviations: CalibrationMetricValues = {
+    headTilt: earsDetected
+      ? Math.abs(headTiltAngle - (activeReference?.headTilt ?? 0))
+      : 0,
+    shoulderTilt: Math.abs(shoulderTiltAngle - (activeReference?.shoulderTilt ?? 0)),
+    neckForward: Math.abs(neckForwardScore - (activeReference?.neckForward ?? 0)),
+    spineTilt: hipsDetected
+      ? Math.abs(spineTiltAngle - (activeReference?.spineTilt ?? 0))
+      : 0,
+  };
+
   return {
     headTiltAngle: Math.round(headTiltAngle * 10) / 10,
     shoulderTiltAngle: Math.round(shoulderTiltAngle * 10) / 10,
     neckForwardScore: Math.round(neckForwardScore),
     spineTiltAngle: Math.round(spineTiltAngle * 10) / 10,
+    torsoReclineAngle,
+    activeGoodPose: goodPose?.kind ?? null,
+    metricScores: {
+      headTilt: headScore,
+      shoulderTilt: shoulderScore,
+      neckForward: neckScore,
+      spineTilt: spineScore,
+    },
+    metricDeviations: {
+      headTilt: Math.round(metricDeviations.headTilt * 10) / 10,
+      shoulderTilt: Math.round(metricDeviations.shoulderTilt * 10) / 10,
+      neckForward: Math.round(metricDeviations.neckForward),
+      spineTilt: Math.round(metricDeviations.spineTilt * 10) / 10,
+    },
+    angleSource,
     overallScore,
     status,
     isDetected: true,

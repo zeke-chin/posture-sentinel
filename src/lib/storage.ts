@@ -1,3 +1,5 @@
+import type { CameraCalibrationProfile } from "@/lib/calibration";
+
 export interface SessionRecord {
   id: string;
   date: string;
@@ -199,6 +201,7 @@ export interface PostureBaseline {
   neckForward: number;
   spineTilt: number;
   capturedAt: number;
+  calibration?: CameraCalibrationProfile;
 }
 
 const BASELINE_KEY = "posture-sentinel:baseline";

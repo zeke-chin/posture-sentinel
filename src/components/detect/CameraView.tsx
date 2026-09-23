@@ -17,6 +17,7 @@ interface CameraViewProps {
   isRequestingPermission?: boolean;
   error: string | null;
   headTiltAngle?: number;
+  headTiltScore?: number;
 }
 
 export default function CameraView({
@@ -31,6 +32,7 @@ export default function CameraView({
   isRequestingPermission = false,
   error,
   headTiltAngle = 0,
+  headTiltScore = 100,
 }: CameraViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dims, setDims] = useState({ width: 640, height: 480 });
@@ -94,6 +96,7 @@ export default function CameraView({
             height={dims.height}
             videoRef={videoRef}
             headTiltAngle={headTiltAngle}
+            headTiltScore={headTiltScore}
             isActive={isActive && !isPaused}
           />
         )}

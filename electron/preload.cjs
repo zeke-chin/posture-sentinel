@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("postureDesktop", {
   monitoring: {
     keepsRunningWhenHidden: true,
     setActive: (active) => ipcRenderer.send("monitoring:set-active", active),
+    updateTray: (score, status) => ipcRenderer.send("monitoring:update-tray", score, status),
     navigate: (path) => ipcRenderer.invoke("monitoring:navigate", path),
     syncRoute: (path) => ipcRenderer.send("monitoring:sync-route", path),
   },

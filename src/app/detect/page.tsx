@@ -112,6 +112,14 @@ export default function DetectPage() {
   }, [detectState]);
 
   useEffect(() => {
+    const hasCurrentScore = detectState === "detecting" && isActive && metrics.isDetected;
+    window.postureDesktop?.monitoring.updateTray(
+      hasCurrentScore ? metrics.overallScore : null,
+      hasCurrentScore ? metrics.status : null
+    );
+  }, [detectState, isActive, metrics.isDetected, metrics.overallScore, metrics.status]);
+
+  useEffect(() => {
     return () => window.postureDesktop?.monitoring.setActive(false);
   }, []);
 

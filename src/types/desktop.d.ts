@@ -26,6 +26,7 @@ interface DesktopBaselineApi {
 interface DesktopMonitoringApi {
   keepsRunningWhenHidden: boolean;
   setActive: (active: boolean) => void;
+  updateTray: (score: number | null, status: "good" | "warning" | "bad" | null) => void;
   navigate: (path: string) => Promise<boolean>;
   syncRoute: (path: string) => void;
 }

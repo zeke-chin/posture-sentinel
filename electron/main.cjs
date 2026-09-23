@@ -3,6 +3,7 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { app, BrowserWindow, dialog, ipcMain, session } = require("electron");
+const { createStatusTray } = require("./tray.cjs");
 const {
   createBaselineProfile,
   deleteBaselineProfile,
@@ -19,6 +20,7 @@ let dashboardWindow = null;
 let nextServer = null;
 let appOrigin = null;
 let monitoringActive = false;
+let statusTray = null;
 
 function isTrustedAppUrl(value) {
   try {
@@ -251,6 +253,13 @@ function configureMonitoringNavigation() {
     if (!isTrustedAppUrl(event.senderFrame.url)) return;
     if (mainWindow?.webContents !== event.sender) return;
     monitoringActive = active === true;
+    if (!monitoringActive) statusTray?.update(null, null);
+  });
+
+  ipcMain.on("monitoring:update-tray", (event, score, status) => {
+    if (!isTrustedAppUrl(event.senderFrame.url)) return;
+    if (mainWindow?.webContents !== event.sender || !monitoringActive) return;
+    statusTray?.update(score, status);
   });
 
   ipcMain.handle("monitoring:navigate", async (event, target) => {
@@ -291,6 +300,7 @@ async function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
     monitoringActive = false;
+    statusTray?.update(null, null);
   });
 
   await mainWindow.loadURL(appOrigin);
@@ -317,6 +327,17 @@ if (!hasSingleInstanceLock) {
       configurePermissions();
       configureBaselineStorage();
       configureMonitoringNavigation();
+      statusTray = await createStatusTray(() => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          void createWindow().then(() => mainWindow?.loadURL(`${appOrigin}/detect`));
+          return;
+        }
+
+        if (!monitoringActive && new URL(mainWindow.webContents.getURL()).pathname !== "/detect") {
+          void mainWindow.loadURL(`${appOrigin}/detect`);
+        }
+        showMonitoringWindow();
+      });
       await createWindow();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

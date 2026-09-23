@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="33" height="18" viewBox="0 0 33 18" fill="none">
+  <g stroke="#ef4444" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="10.4" cy="3.5" r="1.8" fill="#ef4444" stroke="none"/>
+    <path d="M9.7 5.2Q6 5.4 6 7.8V14.8M3.7 14.8H8.7"/>
+    <path d="M6.3 7.2L9 8H12.2M6.3 9.3L8.7 10.8H11.9" stroke-width="1.25"/>
+    <circle cx="6" cy="11.8" r=".8" fill="#ef4444" stroke="none"/>
+  </g>
+  <text x="13.5" y="12.9" fill="#ef4444" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="10" font-weight="750" letter-spacing="-.4">50</text>
+</svg>

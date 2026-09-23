@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { COLORS } from "@/lib/colors";
 
 // Posture states: good → warning → bad → warning → good (loop)
@@ -76,7 +75,10 @@ export default function HeroDemo() {
         return;
       }
 
-      const elapsed = now - startTime;
+      // A queued RAF can carry a timestamp from before an observer resumed the
+      // animation and reset startTime. Clamp it so modulo never yields a
+      // negative posture-state index during route/visibility transitions.
+      const elapsed = Math.max(0, now - startTime);
       const totalCycle = POSTURE_STATES.length * FRAME_DURATION;
       const cycleTime = elapsed % totalCycle;
 

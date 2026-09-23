@@ -31,11 +31,16 @@ interface DesktopMonitoringApi {
   syncRoute: (path: string) => void;
 }
 
+interface DesktopWarningApi {
+  setActive: (active: boolean) => void;
+}
+
 declare global {
   interface Window {
     postureDesktop?: {
       baselines: DesktopBaselineApi;
       monitoring: DesktopMonitoringApi;
+      warning: DesktopWarningApi;
     };
   }
 }

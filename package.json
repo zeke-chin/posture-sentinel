@@ -48,6 +48,7 @@
       "electron/preload.cjs",
       "electron/baseline-store.cjs",
       "electron/tray.cjs",
+      "electron/edge-warning.cjs",
       "electron/assets/tray/option-a-good.svg",
       "electron/assets/tray/option-a-warning.svg",
       "electron/assets/tray/option-a-bad.svg",

@@ -22,10 +22,6 @@ async function renderImage(score, status) {
   let svg = svgTemplates[status] ?? svgTemplates.good;
   svg = svg.replace(`>${icon.sample}</text>`, `>${displayScore}</text>`);
 
-  if (score === null) {
-    svg = svg.replaceAll("#10b981", "#ffffff");
-  }
-
   const png = await sharp(Buffer.from(svg), { density: 144 }).png().toBuffer();
   const image = nativeImage.createFromBuffer(png, { scaleFactor: 2 });
   if (image.isEmpty()) throw new Error("无法生成菜单栏图标。");

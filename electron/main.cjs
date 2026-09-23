@@ -4,6 +4,7 @@ const net = require("node:net");
 const path = require("node:path");
 const { app, BrowserWindow, dialog, ipcMain, session } = require("electron");
 const { createStatusTray } = require("./tray.cjs");
+const { createEdgeWarning } = require("./edge-warning.cjs");
 const {
   createBaselineProfile,
   deleteBaselineProfile,
@@ -21,6 +22,7 @@ let nextServer = null;
 let appOrigin = null;
 let monitoringActive = false;
 let statusTray = null;
+let edgeWarning = null;
 
 function isTrustedAppUrl(value) {
   try {
@@ -253,13 +255,22 @@ function configureMonitoringNavigation() {
     if (!isTrustedAppUrl(event.senderFrame.url)) return;
     if (mainWindow?.webContents !== event.sender) return;
     monitoringActive = active === true;
-    if (!monitoringActive) statusTray?.update(null, null);
+    if (!monitoringActive) {
+      statusTray?.update(null, null);
+      edgeWarning?.setAutomaticActive(false);
+    }
   });
 
   ipcMain.on("monitoring:update-tray", (event, score, status) => {
     if (!isTrustedAppUrl(event.senderFrame.url)) return;
     if (mainWindow?.webContents !== event.sender || !monitoringActive) return;
     statusTray?.update(score, status);
+  });
+
+  ipcMain.on("warning:set-active", (event, active) => {
+    if (!isTrustedAppUrl(event.senderFrame.url)) return;
+    if (mainWindow?.webContents !== event.sender || !monitoringActive) return;
+    edgeWarning?.setAutomaticActive(active === true);
   });
 
   ipcMain.handle("monitoring:navigate", async (event, target) => {
@@ -293,7 +304,7 @@ function configureMonitoringNavigation() {
   });
 }
 
-async function createWindow() {
+async function createWindow(initialUrl = appOrigin) {
   mainWindow = createAppWindow({ backgroundThrottling: false });
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
@@ -301,9 +312,10 @@ async function createWindow() {
     mainWindow = null;
     monitoringActive = false;
     statusTray?.update(null, null);
+    edgeWarning?.stop();
   });
 
-  await mainWindow.loadURL(appOrigin);
+  await mainWindow.loadURL(initialUrl);
 }
 
 function stopNextServer() {
@@ -327,14 +339,21 @@ if (!hasSingleInstanceLock) {
       configurePermissions();
       configureBaselineStorage();
       configureMonitoringNavigation();
+      edgeWarning = createEdgeWarning();
       statusTray = await createStatusTray(() => {
+        const autoStartUrl = `${appOrigin}/detect?desktopAutoStart=1`;
         if (!mainWindow || mainWindow.isDestroyed()) {
-          void createWindow().then(() => mainWindow?.loadURL(`${appOrigin}/detect`));
+          void createWindow(autoStartUrl).catch((error) =>
+            console.error("打开实时检测失败：", error)
+          );
           return;
         }
 
-        if (!monitoringActive && new URL(mainWindow.webContents.getURL()).pathname !== "/detect") {
-          void mainWindow.loadURL(`${appOrigin}/detect`);
+        if (!monitoringActive) {
+          void mainWindow.loadURL(autoStartUrl)
+            .then(showMonitoringWindow)
+            .catch((error) => console.error("打开实时检测失败：", error));
+          return;
         }
         showMonitoringWindow();
       });
@@ -346,7 +365,7 @@ if (!hasSingleInstanceLock) {
     }
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0 && appOrigin) {
+      if ((!mainWindow || mainWindow.isDestroyed()) && appOrigin) {
         void createWindow();
       } else if (dashboardWindow?.isVisible()) {
         focusWindow(dashboardWindow);

@@ -23,7 +23,7 @@ import DetectControls from "@/components/detect/DetectControls";
 import AlertNotification from "@/components/detect/AlertNotification";
 import PostureTimeline from "@/components/detect/PostureTimeline";
 import SessionSummary from "@/components/detect/SessionSummary";
-import CalibrationWizard from "@/components/detect/CalibrationWizard";
+import CalibrationGuide from "@/components/detect/CalibrationGuide";
 import RestReminderBanner, { RestTriggerPrompt } from "@/components/detect/RestReminderBanner";
 import KeyboardHelpOverlay from "@/components/detect/KeyboardHelpOverlay";
 import AchievementToast from "@/components/detect/AchievementToast";
@@ -50,7 +50,14 @@ export default function DetectPage() {
   } = usePoseDetection(settings.detectionFps);
 
   // Load baseline early (needed by usePostureMetrics)
-  const { baseline, hasBaseline, profiles, activeProfileId, captureBaseline } = useBaseline();
+  const {
+    baseline,
+    hasBaseline,
+    profiles,
+    activeProfileId,
+    isLoading: isBaselineLoading,
+    captureBaseline,
+  } = useBaseline();
   const activeBaselineName = profiles.find((profile) => profile.id === activeProfileId)?.name;
 
   const metrics = usePostureMetrics(landmarks, {
@@ -95,7 +102,7 @@ export default function DetectPage() {
   const [showSummary, setShowSummary] = useState(false);
   const [summaryDataLocal, setSummaryDataLocal] = useState<SessionSummaryData | null>(null);
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
-  const [showWizard, setShowWizard] = useState(false);
+  const [showCalibrationGuide, setShowCalibrationGuide] = useState(false);
   const [showBaselineSampling, setShowBaselineSampling] = useState(false);
   const calibrationPausedAnalyzerRef = useRef(false);
   const calibrationStartedDetectionRef = useRef(false);
@@ -103,6 +110,18 @@ export default function DetectPage() {
   // Rest reminder and achievements
   const restReminder = useRestReminder(detectState === "detecting", detectState === "paused");
   const achievements = useAchievements(settings.dailyGoalMinutes);
+  const redWarningActive =
+    detectState === "detecting" &&
+    isActive &&
+    isDetecting &&
+    metrics.isDetected &&
+    analyzer.currentStatus === "bad" &&
+    // Enter only after the analyzer confirms bad posture, but clear as soon as
+    // the live reading improves instead of waiting for the good-status debounce.
+    metrics.status === "bad" &&
+    !showBaselineSampling &&
+    restReminder.phase !== "resting" &&
+    restReminder.phase !== "triggered";
 
   // Electron keeps this renderer alive when other app pages are open in the
   // management window. The browser build intentionally keeps route-local
@@ -123,17 +142,29 @@ export default function DetectPage() {
     return () => window.postureDesktop?.monitoring.setActive(false);
   }, []);
 
-  // Check if first-time user and show calibration wizard
   useEffect(() => {
-    const hasCalibrated = localStorage.getItem("posture-sentinel:calibrated");
-    if (!hasCalibrated) {
-      setShowWizard(true);
-    }
+    window.postureDesktop?.warning.setActive(redWarningActive);
+  }, [redWarningActive]);
+
+  useEffect(() => {
+    return () => window.postureDesktop?.warning.setActive(false);
   }, []);
 
-  const handleWizardComplete = () => {
-    localStorage.setItem("posture-sentinel:calibrated", "true");
-    setShowWizard(false);
+  // Show one non-blocking introduction after baseline storage has loaded.
+  useEffect(() => {
+    if (isBaselineLoading) return;
+    if (hasBaseline) {
+      localStorage.setItem("posture-sentinel:calibration-guide-seen", "true");
+      return;
+    }
+    if (!localStorage.getItem("posture-sentinel:calibration-guide-seen")) {
+      setShowCalibrationGuide(true);
+    }
+  }, [hasBaseline, isBaselineLoading]);
+
+  const dismissCalibrationGuide = () => {
+    localStorage.setItem("posture-sentinel:calibration-guide-seen", "true");
+    setShowCalibrationGuide(false);
   };
 
   // Feed metrics to analyzer - skip during rest periods to avoid recording
@@ -187,6 +218,16 @@ export default function DetectPage() {
     startSession();
     analyzer.start();
   }, [startCamera, startSession, analyzer, detectState]);
+
+  useEffect(() => {
+    if (!window.postureDesktop) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("desktopAutoStart") !== "1") return;
+
+    url.searchParams.delete("desktopAutoStart");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    void handleStart();
+  }, [handleStart]);
 
   // Ref tracking whether detection was auto-paused by the pomodoro break phase.
   // Declared here (above the handlers) so handleResume can reset it. See the
@@ -435,6 +476,11 @@ export default function DetectPage() {
     setShowBaselineSampling(true);
   }, [analyzer, detectState, startCamera, startDetection, videoRef]);
 
+  const handleStartGuidedCalibration = () => {
+    dismissCalibrationGuide();
+    void handleStartBaselineSampling();
+  };
+
   // During baseline sampling in idle state, auto-start pose detection so that
   // real-time metrics are available for capture. When detection is already
   // running this effect is a no-op.
@@ -500,6 +546,15 @@ export default function DetectPage() {
             />
           </div>
         </section>
+
+        {showCalibrationGuide && !hasBaseline && !showBaselineSampling && (
+          <CalibrationGuide
+            isMonitoring={detectState === "detecting"}
+            isStarting={isLoading}
+            onStart={handleStartGuidedCalibration}
+            onDismiss={dismissCalibrationGuide}
+          />
+        )}
 
         {/* Main content: camera + metrics */}
         {showCompletionBanner && !isDetecting && (
@@ -596,7 +651,7 @@ export default function DetectPage() {
               onResume={handleResume}
               onStop={handleStop}
               isLoading={isLoading}
-              shortcutsDisabled={showSummary || showWizard || showBaselineSampling || helpOpen}
+              shortcutsDisabled={showSummary || showBaselineSampling || helpOpen}
               onToggleHelp={() => setHelpOpen((v) => !v)}
               onTogglePomodoro={() => {
                 if (pomodoro.phase === "idle") pomodoro.start();
@@ -699,11 +754,6 @@ export default function DetectPage() {
         />
       )}
     </div>
-    {/* Calibration Wizard */}
-    {showWizard && (
-      <CalibrationWizard onComplete={handleWizardComplete} onSkip={handleWizardComplete} />
-    )}
-
     {/* Rest trigger prompt - shows when rest time arrives */}
     {restReminder.settings.enabled && restReminder.phase === "triggered" && (
       <RestTriggerPrompt

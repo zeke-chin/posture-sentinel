@@ -15,4 +15,7 @@ contextBridge.exposeInMainWorld("postureDesktop", {
     navigate: (path) => ipcRenderer.invoke("monitoring:navigate", path),
     syncRoute: (path) => ipcRenderer.send("monitoring:sync-route", path),
   },
+  warning: {
+    setActive: (active) => ipcRenderer.send("warning:set-active", active),
+  },
 });

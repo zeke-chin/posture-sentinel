@@ -2,9 +2,16 @@
   "name": "posture-sentinel",
   "version": "0.1.0",
   "private": true,
+  "description": "隐私优先的本地坐姿监测应用",
+  "author": "Posture Sentinel",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "desktop:dev": "node electron/dev.cjs",
+    "desktop:prepare": "node electron/prepare-next.cjs",
+    "desktop:pack": "bun run build && bun run desktop:prepare && electron-builder --mac dmg",
+    "desktop:pack:dir": "bun run build && bun run desktop:prepare && electron-builder --mac dir",
     "start": "next start",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
@@ -24,9 +31,60 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^44.4.4",
+    "electron-builder": "^26.15.3",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.85.0",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "build": {
+    "appId": "com.posturesentinel.app",
+    "productName": "Posture Sentinel",
+    "asar": true,
+    "files": [
+      "electron/main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "next"
+      }
+    ],
+    "directories": {
+      "output": "dist-electron"
+    },
+    "mac": {
+      "category": "public.app-category.healthcare-fitness",
+      "icon": "electron/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": "Posture Sentinel 使用摄像头在本机分析坐姿，画面不会被录制或上传。"
+      }
+    },
+    "dmg": {
+      "title": "Posture Sentinel ${version}",
+      "contents": [
+        {
+          "x": 140,
+          "y": 220
+        },
+        {
+          "x": 400,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
+  "productName": "Posture Sentinel"
 }
